@@ -345,7 +345,7 @@ static ssize_t s2w_sweep2wake_dump(struct device *dev,
                 if (s2w_switch != buf[0] - '0')
 		        s2w_switch = buf[0] - '0';
 
-	if (s2w_switch)
+	if (s2w_switch && scr_suspended)
 		register_s2w();
 	else
 		unregister_s2w();
