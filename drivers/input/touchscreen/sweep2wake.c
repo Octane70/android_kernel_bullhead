@@ -41,7 +41,7 @@ struct notifier_block s2w_fb_notif;
 /* Version, author, desc, etc */
 #define DRIVER_AUTHOR "jollaman999 <admin@jollaman999.com>"
 #define DRIVER_DESCRIPTION "Sweep2wake for almost any device"
-#define DRIVER_VERSION "2.0"
+#define DRIVER_VERSION "2.1"
 #define LOGTAG "[sweep2wake]: "
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -51,7 +51,8 @@ MODULE_LICENSE("GPLv2");
 
 /* Tuneables */
 #define S2W_DEBUG		0
-#define S2W_DEFAULT		0
+#define S2W_DEFAULT		0 /* 0 = Off, 1 = S2W + S2S, 2 = S2S */
+#define S2S_DEFAULT		0 /* 0 = Off, 1 = S2S */
 #define S2W_FEATHER             500
 #define S2W_TIME_GAP		250
 #define S2W_VIB_STRENGTH	20	// Vibrator strength
@@ -59,7 +60,9 @@ MODULE_LICENSE("GPLv2");
 #define NAVBAR_HEIGHT		128
 
 /* Resources */
+/* If s2w_switch is 1 or 2, sweep2sleep will work when s2s_switch is 1. */
 int s2w_switch = S2W_DEFAULT;
+static int s2s_switch = S2S_DEFAULT;
 static s64 tap_time_pre = 0;
 static int touch_x = 0;
 static int prev_x = 0;
@@ -172,7 +175,7 @@ static void s2w_input_callback(struct work_struct *unused)
 static void s2w_input_event(struct input_handle *handle, unsigned int type,
 				unsigned int code, int value)
 {
-	if (!s2w_switch)
+	if (!s2w_switch && !s2s_switch)
 		return;
 
 	if (scr_suspended && s2w_switch == 2)
@@ -364,7 +367,12 @@ static ssize_t s2w_sweep2wake_dump(struct device *dev,
                 if (s2w_switch != buf[0] - '0')
 		        s2w_switch = buf[0] - '0';
 
-	if (s2w_switch == 1 || (s2w_switch == 2 && !scr_suspended))
+	if (s2w_switch == 2)
+		s2s_switch = 1;
+
+	if (!s2s_switch && !scr_suspended)
+		unregister_s2w();
+	else if (s2w_switch == 1 || ((s2s_switch || s2w_switch == 2) && !scr_suspended))
 		register_s2w();
 	else
 		unregister_s2w();
@@ -374,6 +382,44 @@ static ssize_t s2w_sweep2wake_dump(struct device *dev,
 
 static DEVICE_ATTR(sweep2wake, (S_IWUSR|S_IRUGO),
 	s2w_sweep2wake_show, s2w_sweep2wake_dump);
+
+static ssize_t s2w_sweep2sleep_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	size_t count = 0;
+
+	count += sprintf(buf, "%d\n", s2s_switch);
+
+	return count;
+}
+
+static ssize_t s2w_sweep2sleep_dump(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int rc, val;
+
+	rc = kstrtoint(buf, 10, &val);
+	if (rc)
+		return -EINVAL;
+
+	if (val == 0 || val == 1) {
+		if (s2s_switch != val)
+			s2s_switch = val;
+	} else
+		return -EINVAL;
+
+	if (!s2s_switch && !scr_suspended)
+		unregister_s2w();
+	else if (s2w_switch == 1 || ((s2s_switch || s2w_switch == 2) && !scr_suspended))
+		register_s2w();
+	else
+		unregister_s2w();
+
+	return count;
+}
+
+static DEVICE_ATTR(sweep2sleep, (S_IWUSR|S_IRUGO),
+	s2w_sweep2sleep_show, s2w_sweep2sleep_dump);
 
 static ssize_t s2w_version_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -400,7 +446,7 @@ static int s2w_fb_notifier_callback(struct notifier_block *self,
 	struct fb_event *evdata = data;
 	int *blank;
 
-	if (!s2w_switch)
+	if (!s2w_switch && !s2s_switch)
 		return 0;
 
 	if (event == FB_EVENT_BLANK) {
@@ -409,7 +455,7 @@ static int s2w_fb_notifier_callback(struct notifier_block *self,
 		switch (*blank) {
 		case FB_BLANK_UNBLANK:
 			scr_suspended = false;
-			if (s2w_switch)
+			if (s2s_switch)
 				register_s2w();
 			else
 				unregister_s2w();
@@ -422,7 +468,7 @@ static int s2w_fb_notifier_callback(struct notifier_block *self,
 					break;
 				}
 				register_s2w();
-			} else if (s2w_switch == 2)
+			} else
 				unregister_s2w();
 			break;
 		}
@@ -479,6 +525,10 @@ static int __init sweep2wake_init(void)
 	rc = sysfs_create_file(android_touch_kobj, &dev_attr_sweep2wake.attr);
 	if (rc) {
 		pr_warn("%s: sysfs_create_file failed for sweep2wake\n", __func__);
+	}
+	rc = sysfs_create_file(android_touch_kobj, &dev_attr_sweep2sleep.attr);
+	if (rc) {
+		pr_warn("%s: sysfs_create_file failed for sweep2sleep\n", __func__);
 	}
 	rc = sysfs_create_file(android_touch_kobj, &dev_attr_sweep2wake_version.attr);
 	if (rc) {
