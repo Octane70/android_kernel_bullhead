@@ -432,7 +432,7 @@ static ssize_t dt2w_doubletap2wake_tmp_dump(struct device *dev,
 
 	if (dt2w_switch_tmp)
 		register_dt2w();
-	else
+	else if (!dt2w_switch)
 		unregister_dt2w();
 
 	return count;
