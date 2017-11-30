@@ -24,6 +24,14 @@
 
 #include "mdss_dsi.h"
 
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+#include <linux/input/doubletap2wake.h>
+#endif
+
+#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
+static int onboot = true;
+#endif
+
 #define DT_CMD_HDR 6
 #define MIN_REFRESH_RATE 30
 
@@ -291,6 +299,14 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
 	if (enable) {
+#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
+		if (onboot == false) {
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			gpio_free(ctrl_pdata->rst_gpio);
+		}
+		onboot = false;
+#endif
+
 		rc = mdss_dsi_request_gpios(ctrl_pdata);
 		if (rc) {
 			pr_err("gpio request failed\n");
@@ -341,6 +357,11 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
+
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+		if (dt2w_switch)
+			goto end;
+#endif		
 		if (ctrl_pdata->dsvreg && ctrl_pdata->dsvreg_pre_off)
 			if (regulator_disable(ctrl_pdata->dsvreg))
 				pr_err("%s: failed to pre-off dsv\n",
@@ -351,6 +372,9 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			if (regulator_disable(ctrl_pdata->dsvreg))
 				pr_err("%s: failed to post-off dsv\n",
 							__func__);
+#if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
+end:
+#endif
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
 	}
@@ -708,6 +732,17 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		if (ctrl->ndx != DSI_CTRL_LEFT)
 			goto end;
 	}
+
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	if (dt2w_switch)
+		goto touch_on;
+#endif
+
+	goto touch_off;
+
+touch_on:
+	ctrl->off_cmds.cmds[1].payload[0] = 0x11;
+touch_off:
 
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
